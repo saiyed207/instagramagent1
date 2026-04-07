@@ -1,0 +1,75 @@
+name: Instagram Auto-Reply Bot
+
+on:
+  schedule:
+    # Runs automatically every hour at minute 0
+    - cron: '0 * * * *'
+  workflow_dispatch:
+    # Allows manual runs and adding rules via GitHub Actions web UI
+    inputs:
+      post_url:
+        description: 'Instagram Post or Reel URL (Optional)'
+        required: false
+        type: string
+      keyword:
+        description: 'Trigger Keyword (Optional)'
+        required: false
+        type: string
+      reply_text:
+        description: 'Reply Text (Optional)'
+        required: false
+        type: string
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # Grants permission to push commits back to the repo
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Fetches full history to prevent rebase issues
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Run Agent Script
+        env:
+          ACCESS_TOKEN: ${{ secrets.ACCESS_TOKEN }}
+          IG_USER_ID: ${{ secrets.IG_USER_ID }}
+          INPUT_POST_URL: ${{ github.event.inputs.post_url }}
+          INPUT_KEYWORD: ${{ github.event.inputs.keyword }}
+          INPUT_REPLY: ${{ github.event.inputs.reply_text }}
+        run: python agent.py
+
+      - name: Commit and push state files
+        run: |
+          # Configure Git user for the automated commit
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # Add the lightweight JSON databases
+          # (Using || true to prevent failure if files haven't been created yet)
+          git add rules.json processed_comments.json || true
+          
+          # Check if there are changes to commit
+          if git diff-index --quiet HEAD; then
+            echo "🔄 No new comments processed or rules added. Skipping commit."
+          else
+            # Commit changes with [skip ci] to prevent triggering infinite workflow loops
+            git commit -m "chore: update bot state (rules/processed comments) [skip ci]"
+            
+            # Pull with rebase to prevent race conditions if someone pushed manually
+            git pull --rebase origin main
+            
+            # Push changes back to the repository
+            git push
+            echo "✅ State successfully pushed to repository."
+          fi
