@@ -2,10 +2,8 @@ name: Instagram Auto-Reply Bot
 
 on:
   schedule:
-    # Runs automatically every hour at minute 0
     - cron: '0 * * * *'
   workflow_dispatch:
-    # Allows manual runs and adding rules via GitHub Actions web UI
     inputs:
       post_url:
         description: 'Instagram Post or Reel URL (Optional)'
@@ -20,17 +18,22 @@ on:
         required: false
         type: string
 
+# 1. ADDED THIS: Prevents multiple bots from running at the same time
+concurrency:
+  group: instagram-bot-state
+  cancel-in-progress: false # Queues jobs instead of cancelling them so we don't miss comments
+
 jobs:
   run-bot:
     runs-on: ubuntu-latest
     permissions:
-      contents: write  # Grants permission to push commits back to the repo
+      contents: write
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Fetches full history to prevent rebase issues
+          fetch-depth: 0
 
       - name: Set up Python 3.10
         uses: actions/setup-python@v5
@@ -51,25 +54,19 @@ jobs:
 
       - name: Commit and push state files
         run: |
-          # Configure Git user for the automated commit
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           
-          # Add the lightweight JSON databases
-          # (Using || true to prevent failure if files haven't been created yet)
           git add rules.json processed_comments.json || true
           
-          # Check if there are changes to commit
           if git diff-index --quiet HEAD; then
             echo "🔄 No new comments processed or rules added. Skipping commit."
           else
-            # Commit changes with [skip ci] to prevent triggering infinite workflow loops
             git commit -m "chore: update bot state (rules/processed comments) [skip ci]"
             
-            # Pull with rebase to prevent race conditions if someone pushed manually
-            git pull --rebase origin main
+            # 2. ADDED '-X theirs': Automatically resolves conflicts by keeping the bot's newest data
+            git pull --rebase -X theirs origin main
             
-            # Push changes back to the repository
             git push
             echo "✅ State successfully pushed to repository."
           fi
